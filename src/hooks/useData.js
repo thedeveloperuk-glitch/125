@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { parseCSV, parseDeveloper, parseProject } from '../utils/csv.js';
+import { parseCSV, parseDeveloperV2 as parseDeveloper, parseProjectV2 as parseProject } from '../utils/csv.js';
 
 // In-memory cache so navigating between tabs doesn't re-fetch
 let _cache = null;
