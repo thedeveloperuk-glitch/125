@@ -74,3 +74,20 @@ export function parseProject(row, i) {
     image: row.image_url || '',
   };
 }
+// Updated parsers — add developer_ids and projects fields
+
+export function parseDeveloperV2(row, i) {
+  const base = parseDeveloper(row, i);
+  return {
+    ...base,
+    projects: row.projects ? row.projects.split(';').map(s => s.trim()).filter(Boolean) : [],
+  };
+}
+
+export function parseProjectV2(row, i) {
+  const base = parseProject(row, i);
+  return {
+    ...base,
+    developer_ids: row.developer_ids ? row.developer_ids.split(';').map(s => s.trim()).filter(Boolean) : [],
+  };
+}
