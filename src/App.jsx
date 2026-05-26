@@ -196,9 +196,7 @@ export default function App() {
         {!loading && !error && tab === 'projects' && (
           <ProjectsTab
             projects={filteredProjects}
-            developers={developers}
             onSelect={setSelectedProject}
-            onOpenDev={name => { const d = developers.find(x => x.name === name); if(d){ setTab('developers'); setTimeout(()=>openDev(d),50); }}}
           />
         )}
       </main>
@@ -252,7 +250,10 @@ function DevCard({ dev, onClick }) {
 
 // ─── DEVELOPER PANEL ──────────────────────────────────────────────────────────
 function DevPanel({ dev, news, newsLoading, projects, onClose, onSelectProject }) {
-  const devProjects = projects.filter(p => p.developer === dev.name || (dev.name && p.developer.includes(dev.name)));
+  const devProjects = projects.filter(p =>
+    (p.developer_ids && p.developer_ids.includes(dev.name)) ||
+    p.developer === dev.name
+  );
   return (
     <div className="panel">
       <div className="panel-header">
@@ -299,24 +300,33 @@ function DevPanel({ dev, news, newsLoading, projects, onClose, onSelectProject }
         )}
 
         {devProjects.length > 0 && (
-          <Section label="Projects">
+          <Section label={`Projects (${devProjects.length})`}>
             {devProjects.map((p, i) => {
+              const [catBg, catColor] = CAT_COLORS[p.category] || ['#f3f4f6','#374151'];
               const [stBg, stColor] = STATUS_COLORS[p.status] || ['#f3f4f6','#374151'];
               return (
-                <div key={i} onClick={() => onSelectProject(p)} style={{ padding: '0.65rem 0', borderTop: '1px solid #ebe6da', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                    <span className="sans" style={{ fontSize: '0.84rem', fontWeight: 500, color: '#1a1814' }}>{p.name}</span>
+                <div key={i} onClick={() => onSelectProject(p)} style={{ padding: '0.7rem 0.75rem', borderRadius: 6, border: '1.5px solid #ddd8cf', background: '#fff', cursor: 'pointer', marginBottom: 6, transition: 'border-color 0.12s' }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor='#c9952a'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor='#ddd8cf'}>
+                  {p.image && <img src={p.image} alt={p.name} style={{ width:'100%', height:80, objectFit:'cover', borderRadius:4, marginBottom:6 }} onError={e=>e.target.style.display='none'} />}
+                  <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:6, marginBottom:4 }}>
+                    <span className="sans" style={{ fontSize:'0.83rem', fontWeight:500, color:'#1a1814', lineHeight:1.3 }}>{p.name}</span>
+                    <div style={{ display:'flex', gap:3, flexShrink:0 }}>
+                      {pill(catBg, catColor, CAT_LABELS[p.category] || p.category, true)}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:3 }}>
                     {pill(stBg, stColor, STATUS_LABELS[p.status] || p.status, true)}
                   </div>
-                  <div className="sans" style={{ fontSize: '0.72rem', color: '#9a948e', marginTop: 2 }}>📍 {p.location}</div>
-                  {(p.homes > 0 || p.hectares > 0) && (
-                    <div className="sans" style={{ fontSize: '0.7rem', color: '#6a6560', marginTop: 4, display: 'flex', gap: 8 }}>
+                  <div className="sans" style={{ fontSize:'0.71rem', color:'#9a948e' }}>📍 {p.location}</div>
+                  {(p.homes > 0 || p.hectares > 0 || p.year_complete) && (
+                    <div className="sans" style={{ fontSize:'0.69rem', color:'#6a6560', marginTop:3, display:'flex', gap:8 }}>
                       {p.homes > 0 && <span>{p.homes.toLocaleString()} homes</span>}
                       {p.hectares > 0 && <span>{p.hectares} ha</span>}
                       {p.year_complete && <span>Est. {p.year_complete}</span>}
                     </div>
                   )}
-                  <span className="sans" style={{ fontSize: '0.65rem', color: '#c9952a', marginTop: 4, display: 'block' }}>View project →</span>
+                  <span className="sans" style={{ fontSize:'0.65rem', color:'#c9952a', marginTop:4, display:'block' }}>View project details →</span>
                 </div>
               );
             })}
@@ -343,31 +353,58 @@ function DevPanel({ dev, news, newsLoading, projects, onClose, onSelectProject }
 }
 
 // ─── PROJECTS TAB ─────────────────────────────────────────────────────────────
-function ProjectsTab({ projects, developers, onSelect, onOpenDev }) {
+function ProjectsTab({ projects, onSelect }) {
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
   const markers = useRef([]);
-  const [mapReady, setMapReady] = useState(!!window.L);
+
+  // Single effect: load Leaflet script if needed, then init map once BOTH
+  // the script is loaded AND the DOM ref is attached (poll until both ready).
+  useEffect(() => {
+    let pollTimer = null;
+
+    const initMap = () => {
+      if (leafletMap.current) return; // already initialised
+      if (!mapRef.current || !window.L) return; // not ready yet
+      const L = window.L;
+      leafletMap.current = L.map(mapRef.current, { scrollWheelZoom: false }).setView([52.5, -1.5], 6);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap © CARTO', maxZoom: 19,
+      }).addTo(leafletMap.current);
+    };
+
+    const startPolling = () => {
+      pollTimer = setInterval(() => {
+        if (mapRef.current && window.L) {
+          clearInterval(pollTimer);
+          initMap();
+        }
+      }, 100);
+    };
+
+    if (window.L) {
+      // Script already loaded — still poll for ref to be attached
+      startPolling();
+    } else {
+      // Load Leaflet, then start polling for ref
+      if (!document.querySelector('script[src*="leaflet"]')) {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.min.js';
+        script.onload = startPolling;
+        document.head.appendChild(script);
+      } else {
+        // Script tag exists but not loaded yet
+        startPolling();
+      }
+    }
+
+    return () => {
+      clearInterval(pollTimer);
+    };
+  }, []); // runs once on mount
 
   useEffect(() => {
-    if (window.L) { setMapReady(true); return; }
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.min.js';
-    script.onload = () => setMapReady(true);
-    document.head.appendChild(script);
-  }, []);
-
-  useEffect(() => {
-    if (!mapReady || !mapRef.current || leafletMap.current) return;
-    const L = window.L;
-    leafletMap.current = L.map(mapRef.current, { scrollWheelZoom: false }).setView([52.5, -1.5], 6);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap © CARTO', maxZoom: 19,
-    }).addTo(leafletMap.current);
-  }, [mapReady]);
-
-  useEffect(() => {
-    if (!mapReady || !leafletMap.current || !window.L) return;
+    if (!leafletMap.current || !window.L) return;
     const L = window.L;
     markers.current.forEach(m => m.remove());
     markers.current = [];
@@ -379,14 +416,12 @@ function ProjectsTab({ projects, developers, onSelect, onOpenDev }) {
       m.on('click', () => onSelect(p));
       markers.current.push(m);
     });
-  }, [projects, mapReady, onSelect]);
+  }, [projects, onSelect]);
 
   return (
     <div>
       <div style={{ border: '1px solid #d8d2c5', borderRadius: 6, overflow: 'hidden', marginBottom: '1.25rem' }}>
-        <div ref={mapRef} style={{ height: 320, width: '100%', background: '#e8e4de' }}>
-          {!mapReady && <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--sans)', fontSize: '0.85rem', color: '#9a948e' }}>Loading map…</div>}
-        </div>
+        <div ref={mapRef} style={{ height: 320, width: '100%', background: '#e8e4de' }} />
       </div>
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
         {Object.entries(MAP_CAT_COLORS).map(([cat, col]) => (
@@ -408,6 +443,10 @@ function ProjectsTab({ projects, developers, onSelect, onOpenDev }) {
 function ProjectCard({ project: p, onClick }) {
   const [catBg, catColor] = CAT_COLORS[p.category] || ['#f3f4f6','#374151'];
   const [stBg, stColor] = STATUS_COLORS[p.status] || ['#f3f4f6','#374151'];
+  // Show up to 2 linked developer names, falling back to the raw developer field
+  const devDisplay = (p.developer_ids && p.developer_ids.length > 0)
+    ? p.developer_ids.slice(0, 2).join(', ') + (p.developer_ids.length > 2 ? ` +${p.developer_ids.length - 2}` : '')
+    : p.developer;
   return (
     <div className="proj-card" onClick={onClick}>
       {p.image && <img src={p.image} alt={p.name} className="card-img" onError={e=>e.target.style.display='none'} />}
@@ -418,7 +457,7 @@ function ProjectCard({ project: p, onClick }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: '0.3rem' }}>
           {pill(stBg, stColor, STATUS_LABELS[p.status] || p.status, true)}
-          <span className="sans" style={{ fontSize: '0.71rem', color: '#9a948e' }}>{p.developer}</span>
+          <span className="sans" style={{ fontSize: '0.71rem', color: '#9a948e' }}>{devDisplay}</span>
         </div>
         <div className="sans" style={{ fontSize: '0.71rem', color: '#9a948e', marginBottom: '0.35rem' }}>📍 {p.location}</div>
         <p className="sans" style={{ fontSize: '0.77rem', color: '#3a3530', lineHeight: 1.55, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginBottom: '0.4rem' }}>{p.description}</p>
@@ -437,7 +476,9 @@ function ProjectPanel({ project: p, developers, onClose, onOpenDev }) {
   const mapRef = useRef(null);
   const [catBg, catColor] = CAT_COLORS[p.category] || ['#f3f4f6','#374151'];
   const [stBg, stColor] = STATUS_COLORS[p.status] || ['#f3f4f6','#374151'];
-  const dev = developers.find(d => d.name === p.developer || p.developer.includes(d.name));
+  const linkedDevs = (p.developer_ids && p.developer_ids.length > 0)
+    ? p.developer_ids.map(id => developers.find(d => d.name === id)).filter(Boolean)
+    : developers.filter(d => d.name === p.developer || p.developer === d.name).slice(0, 1);
 
   useEffect(() => {
     const init = () => {
@@ -487,16 +528,20 @@ function ProjectPanel({ project: p, developers, onClose, onOpenDev }) {
           <div ref={mapRef} style={{ height: 220, borderRadius: 6, overflow: 'hidden', marginBottom: '1.25rem', background: '#e8e4de' }} />
         )}
 
-        {dev && (
+        {linkedDevs.length > 0 && (
           <div style={{ borderTop: '2px solid #ebe6da', paddingTop: '1rem', marginBottom: '1rem' }}>
-            <div className="sans" style={{ fontSize: '0.67rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a948e', marginBottom: '0.55rem' }}>Developer</div>
-            <button onClick={() => onOpenDev(p.developer)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: '#fff', border: '1.5px solid #d8d2c5', borderRadius: 6, padding: '0.65rem 0.85rem', cursor: 'pointer', textAlign: 'left' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: 'var(--serif)', fontSize: '0.9rem', color: '#1a1814', marginBottom: 2 }}>{dev.name}</div>
-                <div className="sans" style={{ fontSize: '0.7rem', color: '#9a948e' }}>{dev.region}</div>
-              </div>
-              <span className="sans" style={{ fontSize: '0.7rem', color: '#c9952a' }}>View profile →</span>
-            </button>
+            <div className="sans" style={{ fontSize: '0.67rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a948e', marginBottom: '0.55rem' }}>
+              {linkedDevs.length === 1 ? 'Developer' : 'Developers'}
+            </div>
+            {linkedDevs.map((dev, i) => (
+              <button key={i} onClick={() => onOpenDev(dev.name)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: '#fff', border: '1.5px solid #d8d2c5', borderRadius: 6, padding: '0.65rem 0.85rem', cursor: 'pointer', textAlign: 'left', marginBottom: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--serif)', fontSize: '0.9rem', color: '#1a1814', marginBottom: 2 }}>{dev.name}</div>
+                  <div className="sans" style={{ fontSize: '0.7rem', color: '#9a948e' }}>{dev.region}</div>
+                </div>
+                <span className="sans" style={{ fontSize: '0.7rem', color: '#c9952a', whiteSpace: 'nowrap' }}>View profile →</span>
+              </button>
+            ))}
           </div>
         )}
 
