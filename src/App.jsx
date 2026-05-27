@@ -357,23 +357,25 @@ function ProjectsTab({ projects, onSelect }) {
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
   const markers = useRef([]);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Single effect: load Leaflet script if needed, then init map once BOTH
-  // the script is loaded AND the DOM ref is attached (poll until both ready).
+  // Load Leaflet script, then initialise map once both script AND DOM ref are ready.
+  // mapReady state is set after L.map() succeeds, triggering the markers effect.
   useEffect(() => {
     let pollTimer = null;
 
     const initMap = () => {
-      if (leafletMap.current) return; // already initialised
-      if (!mapRef.current || !window.L) return; // not ready yet
+      if (leafletMap.current) return;
+      if (!mapRef.current || !window.L) return;
       const L = window.L;
       leafletMap.current = L.map(mapRef.current, { scrollWheelZoom: false }).setView([52.5, -1.5], 6);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© OpenStreetMap © CARTO', maxZoom: 19,
       }).addTo(leafletMap.current);
+      setMapReady(true); // triggers markers effect
     };
 
-    const startPolling = () => {
+    const poll = () => {
       pollTimer = setInterval(() => {
         if (mapRef.current && window.L) {
           clearInterval(pollTimer);
@@ -383,28 +385,22 @@ function ProjectsTab({ projects, onSelect }) {
     };
 
     if (window.L) {
-      // Script already loaded — still poll for ref to be attached
-      startPolling();
+      poll();
+    } else if (!document.querySelector('script[src*="leaflet.min.js"]')) {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.min.js';
+      script.onload = poll;
+      document.head.appendChild(script);
     } else {
-      // Load Leaflet, then start polling for ref
-      if (!document.querySelector('script[src*="leaflet"]')) {
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.min.js';
-        script.onload = startPolling;
-        document.head.appendChild(script);
-      } else {
-        // Script tag exists but not loaded yet
-        startPolling();
-      }
+      poll(); // script tag exists, waiting for it to load
     }
 
-    return () => {
-      clearInterval(pollTimer);
-    };
-  }, []); // runs once on mount
+    return () => clearInterval(pollTimer);
+  }, []);
 
+  // Re-run whenever projects change OR after map initialises (mapReady flips to true)
   useEffect(() => {
-    if (!leafletMap.current || !window.L) return;
+    if (!mapReady || !leafletMap.current || !window.L) return;
     const L = window.L;
     markers.current.forEach(m => m.remove());
     markers.current = [];
@@ -416,7 +412,7 @@ function ProjectsTab({ projects, onSelect }) {
       m.on('click', () => onSelect(p));
       markers.current.push(m);
     });
-  }, [projects, onSelect]);
+  }, [projects, onSelect, mapReady]); // mapReady in deps = runs once map is actually ready
 
   return (
     <div>
