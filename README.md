@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/28278229/README.md)
 # The Developer Index
 
 A directory of UK property developers, housing associations and development corporations working in urban regeneration and placemaking.
